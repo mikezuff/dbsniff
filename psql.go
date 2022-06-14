@@ -99,6 +99,8 @@ func (s *PostgresServer) serveClient(conn net.Conn, wg *sync.WaitGroup) {
 		return
 	}
 
+	log.Printf("connected to %v", conn.RemoteAddr())
+
 	db, err := sql.Open("postgres", s.connStr)
 	if err != nil {
 		log.Printf("error opening connection: %v", err)
@@ -113,7 +115,15 @@ func (s *PostgresServer) serveClient(conn net.Conn, wg *sync.WaitGroup) {
 
 	conn.SetDeadline(time.Time{})
 
+	log.Printf("connected to upstream, sending ReadyForQuery")
+	err = s.sendReadyForQuery(brw.Writer)
+	if err != nil {
+		log.Printf("error sending ReadyForQuery: %v", err)
+		return
+	}
+
 	for {
+		log.Printf("reading frame\n")
 		ft, fl, err := readFrameHeader(brw.Reader)
 		if err != nil {
 			log.Printf("error reading frame header: %v", err)
@@ -125,7 +135,6 @@ func (s *PostgresServer) serveClient(conn net.Conn, wg *sync.WaitGroup) {
 }
 
 func (s *PostgresServer) recvStartupMessage(brw *bufio.ReadWriter) error {
-
 	var (
 		frameLen uint32
 		buf      readBuf
@@ -180,9 +189,17 @@ frameLoop:
 	}
 }
 
+func (s *PostgresServer) sendReadyForQuery(w io.Writer) error {
+	buf := newWriteBuf(frameReadyForQuery)
+	buf.byte('I')
+	return buf.send(w)
+}
+
 type frameType byte
 
-const ()
+const (
+	frameReadyForQuery frameType = 'Z'
+)
 
 func readFrameTypeHeader(br *bufio.Reader, wantType frameType) (frameLen uint32, err error) {
 	gotType, frameLen, err := readFrameHeader(br)
@@ -197,10 +214,12 @@ func readFrameHeader(br *bufio.Reader) (t frameType, frameLen uint32, err error)
 	if err != nil {
 		return 0, 0, err
 	}
+	log.Printf("read frame type %v", tb) // TODO: DELME
 	frameLen, err = readUint32(br)
 	if err != nil {
 		return 0, 0, err
 	}
+	log.Printf("read frame length %v", frameLen) // TODO: DELME
 	return frameType(tb), frameLen, nil
 }
 
